@@ -1,9 +1,9 @@
-# hello-hocuspocus-milkdown
+# hello-astro-milkdown-document-server
 
 Collaborative Markdown editing prototype: **Astro** app with a **Milkdown** editor, real-time sync
 over plain **y-websocket**, and a self-built document backend (per-transaction persistence,
 Markdown transformation, versions, REST API) on **Drizzle + SQLite**.
-(The repo name is historical — Hocuspocus was replaced, see `docs/`.)
+(Started as a Hocuspocus prototype; Hocuspocus was replaced by this self-built backend — see `docs/`.)
 
 ## Run
 

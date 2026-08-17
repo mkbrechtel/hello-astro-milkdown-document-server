@@ -1,5 +1,5 @@
 {
-  "name": "hello-hocuspocus-milkdown",
+  "name": "hello-astro-milkdown-document-server",
   "private": true,
   "type": "module",
   "scripts": {
