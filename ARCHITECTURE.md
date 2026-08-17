@@ -1,87 +1,79 @@
 # Architecture
 
-This is a single-package prototype combining an Astro app (client) with an
-in-process Hocuspocus server (collaboration backend), connected via Yjs.
+Single Astro project that is both the web app **and** the collaboration backend for Milkdown.
+No Hocuspocus: the WebSocket sync endpoint, persistence, transformation to Markdown, versions and a
+document REST API are implemented directly on Yjs primitives inside Astro.
 
 ## Overview
 
 ```mermaid
 flowchart TB
-    subgraph Browser["Browser (tab)"]
-        Page["index.astro"]
+    subgraph Browser["Browser tab (logged in via username cookie)"]
+        Page["/docs/[name].astro (SSR)"]
         Island["Editor.tsx (React island)"]
-        Milkdown["Milkdown editor\n(commonmark + collab plugin)"]
+        Milkdown["Milkdown\ncommonmark + collab plugin\n(y-prosemirror bindings)"]
         YDoc["Y.Doc"]
-        Provider["HocuspocusProvider\n(WebSocket client)"]
-
-        Page --> Island --> Milkdown
-        Milkdown <-- "collabService.bindDoc" --> YDoc
-        YDoc <--> Provider
+        Provider["y-websocket\nWebsocketProvider"]
+        Page --> Island --> Milkdown <--> YDoc <--> Provider
     end
 
-    subgraph Node["Node process (npm run dev)"]
-        Astro["Astro dev server\n:4321 (HTTP)"]
-        Hocuspocus["Hocuspocus Server\n:1234 (WebSocket)"]
-        Integration["astro.config.mjs\nhocuspocusIntegration()"]
-
-        Integration -- "astro:server:setup" --> Hocuspocus
+    subgraph Node["Astro (dev: Vite server · prod: server.mjs)"]
+        WS["src/server/ws.js\n/ws/:name — y-websocket protocol\nsync + awareness · cookie auth"]
+        Docs["src/server/docs.js\nlive Y.Docs · load = replay log\nstore each transaction · versions · revert"]
+        MD["src/server/markdown.js\nY.XmlFragment → PM JSON → Markdown"]
+        API["src/pages/api/**\nlogin · documents CRUD\nupdates log · versions · revert"]
+        Pages["src/pages/*.astro\nlogin · list · editor"]
+        WS --> Docs
+        API --> Docs
+        Pages --> Docs
+        Docs --> MD
     end
 
-    Provider <== "ws://localhost:1234\nYjs sync protocol" ==> Hocuspocus
-    Browser -- "HTTP" --> Astro
-    Astro -. "serves" .-> Page
+    subgraph DB["SQLite via Drizzle (data/app.sqlite)"]
+        T1["documents\nname · markdown · created/updated by/at"]
+        T2["updates (append-only)\nid · document · yjs update blob · username · at"]
+        T3["versions\nid · document · name · up_to_update_id · by · at"]
+    end
+
+    Provider <== "ws://host/ws/:name" ==> WS
+    Browser -- "HTTP (cookies)" --> Pages
+    Browser -- "fetch / forms" --> API
+    Docs --> T1 & T2 & T3
 ```
 
-## Components
+## Request paths
 
-- **`astro.config.mjs`** — defines a small custom Astro integration
-  (`hocuspocusIntegration`) that hooks into `astro:server:setup` and starts
-  the Hocuspocus server in the same Node process as `astro dev`. This is why
-  a single `npm run dev` boots both the web app (port 4321) and the
-  collaboration server (port 1234).
+- **Login** — `POST /api/login {username}` sets a `username` cookie (prototype-grade "auth"). Pages redirect to `/login` without it; API returns 401; the WebSocket upgrade is rejected with 401.
+- **Editing** — the browser opens `ws://…/ws/<name>`. `ws.js` runs the standard y-websocket protocol (`y-protocols/sync` + `awareness`) against the live `Y.Doc` from `docs.js`. The connection's origin object carries the username, so every `doc.on("update")` from that socket is stored as **one row in `updates` with that username**.
+- **Transformation** — after each change (debounced 500 ms) the server converts the Yjs `prosemirror` fragment to ProseMirror JSON (`y-prosemirror`) and then to Markdown (`markdown.js`), and writes it to `documents.markdown` with `updated_by`. `GET /api/documents/:name?format=markdown` returns exactly that; `?format=json` the PM JSON.
+- **Loading** — no state blob is stored. A document is loaded by replaying all its `updates` rows in id order into a fresh `Y.Doc` (`Y.applyUpdate`). Any historical state is `?at=<updateId>` — replay up to that id.
+- **Versions** — a version is a named pointer `up_to_update_id` into the log. Revert clones the fragment content of the reconstructed old doc into the live doc inside one Y transaction attributed to the caller — it is a **new** log entry; history is never rewritten.
 
-- **`src/server/hocuspocus.js`** — creates and starts the `@hocuspocus/server`
-  `Server` instance (in-memory, no persistence extension configured yet).
-  Exported as `startHocuspocus()` so the integration can call it once.
+## Files
 
-- **`src/pages/index.astro`** — the single page of the prototype. Renders the
-  `Editor` component as a client-only React island (`client:only="react"`),
-  since Milkdown/Yjs need the browser's `WebSocket`/DOM APIs and shouldn't be
-  server-rendered.
+| Path | Role |
+|---|---|
+| `astro.config.mjs` | `output: server`, node adapter (middleware), integration attaching the WS server to Vite's http server in dev |
+| `server.mjs` | production entry: http server = static + SSR handler + `attachWebSocketServer` |
+| `src/server/db/schema.js` | Drizzle schema (`documents`, `updates`, `versions`) |
+| `src/server/db/index.js` | better-sqlite3 + Drizzle instance (globalThis singleton), creates tables |
+| `src/server/docs.js` | document manager: live docs, replay, per-transaction store, markdown persist, versions, revert |
+| `src/server/markdown.js` | Yjs → PM JSON → Markdown for Milkdown's commonmark node set |
+| `src/server/ws.js` | y-websocket protocol server, cookie auth, per-user origins |
+| `src/server/auth.js` | cookie parsing / name validation |
+| `src/pages/api/**` | REST API (see README) |
+| `src/pages/{login,index}.astro`, `src/pages/docs/[name].astro` | UI |
+| `src/components/Editor.tsx` | Milkdown + `y-websocket` provider + awareness (user name/colour) |
+| `Containerfile` | multi-stage build → `node server.mjs`, `/app/data` volume |
 
-- **`src/components/Editor.tsx`** — sets up the collaborative editor per
-  browser tab:
-  1. Creates a local `Y.Doc()`.
-  2. Opens a `HocuspocusProvider` pointed at `ws://localhost:1234`, room name
-     `"milkdown-prototype"`, bound to that doc.
-  3. Creates a Milkdown `Editor` with `commonmark` (markdown parsing/schema),
-     `nord` (theme), and `collab` (the Yjs-backed collaboration plugin).
-  4. Binds Milkdown's collab service to the `Y.Doc` and to the provider's
-     awareness (cursors/presence), then connects.
-  5. On first sync, seeds the doc with a welcome template only if it's empty
-     — so reconnecting clients don't stomp on existing content.
-  6. Cleans up the editor, provider, and doc on unmount.
+## Database portability
 
-## Data flow (why it's "live" across tabs)
+Drizzle is dialect-agnostic: this prototype uses `drizzle-orm/sqlite-core` + `better-sqlite3`.
+Moving to Postgres = swap the column builders to `drizzle-orm/pg-core` (`bytea` for the update blob), the driver to `drizzle-orm/node-postgres`, and manage schema with `drizzle-kit`. The document manager only uses Drizzle's query builder, so it is unchanged.
 
-1. Each browser tab holds its own `Y.Doc`, kept in sync with the others via
-   Yjs CRDT updates.
-2. `HocuspocusProvider` ships those updates to the Hocuspocus server over
-   WebSocket and receives updates from other connected clients in the same
-   "document" (`milkdown-prototype`).
-3. Milkdown's `collab` plugin mirrors ProseMirror editor state into the
-   shared `Y.Doc` (and vice versa), so keystrokes in one tab appear in all
-   tabs subscribed to the same document name.
-4. Awareness (cursor position/presence) is synced the same way via
-   `provider.awareness`.
+## Known limitations
 
-## Current limitations (prototype scope)
-
-- **No persistence** — the Hocuspocus server holds document state only in
-  memory; restarting the dev server clears all documents. Adding
-  `@hocuspocus/extension-sqlite` (or another storage extension) would fix
-  this.
-- **Single hardcoded room** (`"milkdown-prototype"`) — there's no
-  routing/multi-document support yet.
-- **No auth** — any client that can reach the WebSocket port can join and
-  edit the document.
+- Login is a cookie with a username — no passwords, no sessions; fine for the prototype, not for the internet.
+- Load-by-replay is O(#updates). For long-lived docs add periodic compaction (`Y.mergeUpdates` of a prefix into one row, or a cached state row) — the log stays the source of truth.
+- Markdown serializer covers the commonmark preset (headings, paragraphs, lists, quotes, code, hr, images, strong/emphasis/code/link). GFM tables etc. would need extending.
+- Single node process; scaling out needs a shared pub/sub between WS instances (y-redis pattern).

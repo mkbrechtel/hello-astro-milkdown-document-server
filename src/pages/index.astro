@@ -1,37 +1,44 @@
 ---
-import Editor from "../components/Editor";
----
+import Layout from "../layouts/Layout.astro";
+import { COOKIE_NAME, isValidUsername } from "../server/auth.js";
+import { listDocuments } from "../server/docs.js";
 
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Milkdown + Hocuspocus prototype</title>
-    <style>
-      body {
-        margin: 0;
-        font-family: system-ui, sans-serif;
-        background: #f7f7f8;
-      }
-      main {
-        max-width: 720px;
-        margin: 0 auto;
-        padding: 2rem 1rem;
-      }
-      .milkdown-editor {
-        background: white;
-        border: 1px solid #e0e0e0;
-        border-radius: 8px;
-        padding: 1rem 1.5rem;
-        min-height: 400px;
-      }
-    </style>
-  </head>
-  <body>
-    <main>
-      <h1>Milkdown + Hocuspocus</h1>
-      <p>Open this page in two tabs to see live collaboration.</p>
-      <Editor client:only="react" />
-    </main>
-  </body>
-</html>
+const username = Astro.cookies.get(COOKIE_NAME)?.value;
+if (!isValidUsername(username)) return Astro.redirect("/login?next=/");
+const docs = listDocuments();
+const fmt = (d) => (d ? new Date(d).toLocaleString() : "–");
+---
+<Layout title="Documents" username={username}>
+  <div class="card">
+    <h2 style="margin-top:0">New document</h2>
+    <form method="post" action="/api/documents" style="display:flex;gap:.5rem">
+      <input type="hidden" name="redirect" value="1" />
+      <input type="text" name="name" placeholder="document-name" required pattern="[a-zA-Z0-9_.\-]{1,64}" style="flex:1" />
+      <button class="primary" type="submit">Create & open</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0">Documents</h2>
+    {docs.length === 0 ? <p class="muted">No documents yet.</p> : (
+      <table>
+        <thead><tr><th>Name</th><th>Created by</th><th>Last edit</th><th>Transactions</th><th></th></tr></thead>
+        <tbody>
+          {docs.map((d) => (
+            <tr>
+              <td><a href={`/docs/${encodeURIComponent(d.name)}`}><strong>{d.name}</strong></a></td>
+              <td>{d.createdBy}</td>
+              <td>{d.updatedBy ? `${d.updatedBy} · ${fmt(d.updatedAt)}` : "–"}</td>
+              <td>{d.updateCount}</td>
+              <td class="muted">
+                <a href={`/api/documents/${encodeURIComponent(d.name)}?format=markdown`}>.md</a> ·
+                <a href={`/api/documents/${encodeURIComponent(d.name)}`}>json</a>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )}
+  </div>
+  <p class="muted">API: <code>GET /api/documents</code>, <code>GET /api/documents/:name?format=markdown</code>, <code>GET /api/documents/:name/updates</code>, <code>GET|POST /api/documents/:name/versions</code>, <code>POST /api/documents/:name/versions/:id/revert</code></p>
+</Layout>

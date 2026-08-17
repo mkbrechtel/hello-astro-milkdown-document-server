@@ -1,0 +1,66 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import Editor from "../../components/Editor";
+import { COOKIE_NAME, isValidUsername, isValidDocumentName } from "../../server/auth.js";
+import { getDocumentRow, listVersions, listUpdates } from "../../server/docs.js";
+
+const { name } = Astro.params;
+const username = Astro.cookies.get(COOKIE_NAME)?.value;
+if (!isValidUsername(username)) return Astro.redirect(`/login?next=${encodeURIComponent(Astro.url.pathname)}`);
+if (!isValidDocumentName(name) || !getDocumentRow(name)) return new Response("Document not found", { status: 404 });
+
+const versions = listVersions(name);
+const updates = listUpdates(name);
+const api = `/api/documents/${encodeURIComponent(name)}`;
+const here = Astro.url.pathname;
+const fmt = (d) => new Date(d).toLocaleString();
+---
+<Layout title={name} username={username}>
+  <h2 style="margin:.25rem 0 1rem"><a href="/" style="color:#777;text-decoration:none">Documents /</a> {name}</h2>
+  <div style="display:grid;grid-template-columns:1fr 300px;gap:1rem;align-items:start">
+    <div>
+      <Editor client:only="react" docName={name} username={username} />
+      <p class="muted">Open this page in a second tab (or log in as someone else in a private window) to see live collaboration.</p>
+    </div>
+    <aside>
+      <div class="card">
+        <h3 style="margin-top:0">Versions</h3>
+        <form method="post" action={`${api}/versions`} style="display:flex;gap:.4rem;margin-bottom:.75rem">
+          <input type="hidden" name="redirect" value={here} />
+          <input type="text" name="name" placeholder="version name" style="flex:1;min-width:0" />
+          <button class="primary" type="submit">Snapshot</button>
+        </form>
+        {versions.length === 0 ? <p class="muted">No versions yet.</p> : (
+          <table>
+            {versions.map((v) => (
+              <tr>
+                <td>
+                  <a href={`${api}/versions/${v.id}?format=markdown`}><strong>{v.name}</strong></a><br />
+                  <span class="muted">{v.createdBy} · {fmt(v.createdAt)} · up to #{v.upToUpdateId}</span>
+                </td>
+                <td style="text-align:right">
+                  <form method="post" action={`${api}/versions/${v.id}/revert`}>
+                    <input type="hidden" name="redirect" value={here} />
+                    <button type="submit" title="Revert live document to this version">Revert</button>
+                  </form>
+                </td>
+              </tr>
+            ))}
+          </table>
+        )}
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Transaction log <span class="muted">({updates.length})</span></h3>
+        <p class="muted">Every Yjs update is a row. Reload to refresh.</p>
+        <div style="max-height:260px;overflow:auto">
+          <table>
+            {updates.slice(-30).reverse().map((u) => (
+              <tr><td>#{u.id}</td><td>{u.username}</td><td class="muted">{fmt(u.createdAt)}</td><td class="muted">{u.size} B</td></tr>
+            ))}
+          </table>
+        </div>
+        <p class="muted"><a href={`${api}/updates`}>full log</a> · <a href={`${api}?format=markdown`}>current .md</a> · <a href={api}>json</a></p>
+      </div>
+    </aside>
+  </div>
+</Layout>

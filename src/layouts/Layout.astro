@@ -1,0 +1,35 @@
+---
+const { title = "Collaborative Markdown", username } = Astro.props;
+---
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <style is:global>
+      body { margin: 0; font-family: system-ui, sans-serif; background: #f7f7f8; color: #222; }
+      header { display: flex; gap: 1rem; align-items: center; padding: .75rem 1.5rem; background: #fff; border-bottom: 1px solid #e0e0e0; }
+      header a { color: inherit; text-decoration: none; font-weight: 600; }
+      header .spacer { flex: 1; }
+      header form { margin: 0; }
+      main { max-width: 900px; margin: 0 auto; padding: 1.5rem 1rem; }
+      button, input[type=submit] { cursor: pointer; padding: .35rem .7rem; border: 1px solid #ccc; border-radius: 6px; background: #fff; }
+      button.primary { background: #2f6feb; color: #fff; border-color: #2f6feb; }
+      input[type=text] { padding: .35rem .5rem; border: 1px solid #ccc; border-radius: 6px; }
+      table { border-collapse: collapse; width: 100%; background: #fff; }
+      th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid #eee; font-size: .92rem; }
+      code { background: #eef; padding: 0 .25rem; border-radius: 3px; }
+      .card { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1rem; }
+      .muted { color: #777; font-size: .85rem; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <a href="/">📝 Collaborative Markdown</a>
+      <span class="spacer"></span>
+      {username && <span class="muted">signed in as <strong>{username}</strong></span>}
+      {username && <form method="post" action="/api/logout"><button>Logout</button></form>}
+    </header>
+    <main><slot /></main>
+  </body>
+</html>

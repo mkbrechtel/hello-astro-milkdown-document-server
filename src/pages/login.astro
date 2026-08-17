@@ -1,0 +1,15 @@
+---
+import Layout from "../layouts/Layout.astro";
+const next = Astro.url.searchParams.get("next") ?? "/";
+---
+<Layout title="Login">
+  <div class="card" style="max-width:420px;margin:3rem auto">
+    <h2>Who are you?</h2>
+    <p class="muted">Prototype login: pick a username. It's stored in a cookie and attached to every edit you make.</p>
+    <form method="post" action="/api/login" style="display:flex;gap:.5rem">
+      <input type="hidden" name="redirect" value={next} />
+      <input type="text" name="username" placeholder="username" required pattern="[a-zA-Z0-9_.\-]{1,32}" autofocus style="flex:1" />
+      <button class="primary" type="submit">Login</button>
+    </form>
+  </div>
+</Layout>
